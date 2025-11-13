@@ -29,6 +29,8 @@ interface ConfigUpdate {
   max_lines_per_blob?: number;
   text_extensions?: string[];
   exclude_patterns?: string[];
+  // 是否在搜索前自动执行自动索引
+  auto_index_on_search?: boolean;
 }
 
 /**
@@ -83,6 +85,8 @@ export function createApp(): express.Application {
         token_full: config.token,
         text_extensions: Array.from(config.textExtensions),
         exclude_patterns: config.excludePatterns,
+        // 暴露当前自动索引配置，方便 Web 前端展示和切换
+        auto_index_on_search: config.autoIndexOnSearch,
       });
     } catch (error: any) {
       logger.error(`Failed to get config: ${error.message}`);
@@ -123,6 +127,10 @@ export function createApp(): express.Application {
       }
       if (configUpdate.exclude_patterns !== undefined) {
         settingsData.EXCLUDE_PATTERNS = configUpdate.exclude_patterns;
+      }
+      if (configUpdate.auto_index_on_search !== undefined) {
+        // 将 Web 端布尔开关写回到 TOML 设置中，控制搜索前是否自动索引
+        settingsData.AUTO_INDEX_ON_SEARCH = configUpdate.auto_index_on_search;
       }
 
       // 保存设置
@@ -467,4 +475,3 @@ export function setupWebSocket(server: any): void {
 
   logger.info('WebSocket server setup completed');
 }
-

@@ -16,6 +16,8 @@ const DEFAULT_CONFIG = {
   MAX_LINES_PER_BLOB: 800,
   BASE_URL: 'https://api.example.com',
   TOKEN: 'your-token-here',
+  // 是否在搜索前自动执行项目增量索引，默认开启保证结果最新
+  AUTO_INDEX_ON_SEARCH: true,
   TEXT_EXTENSIONS: [
     '.py',
     '.js',
@@ -121,6 +123,8 @@ export class Config {
   indexStoragePath: string;
   batchSize: number;
   maxLinesPerBlob: number;
+  // 是否在搜索前自动执行增量索引
+  autoIndexOnSearch: boolean;
   baseUrl: string;
   token: string;
   textExtensions: Set<string>;
@@ -139,6 +143,9 @@ export class Config {
 
     this.batchSize = settings.BATCH_SIZE ?? DEFAULT_CONFIG.BATCH_SIZE;
     this.maxLinesPerBlob = settings.MAX_LINES_PER_BLOB ?? DEFAULT_CONFIG.MAX_LINES_PER_BLOB;
+    // TOML 中使用 AUTO_INDEX_ON_SEARCH 控制搜索前是否自动索引，未配置时使用默认值 true
+    this.autoIndexOnSearch =
+      settings.AUTO_INDEX_ON_SEARCH ?? DEFAULT_CONFIG.AUTO_INDEX_ON_SEARCH;
     this.baseUrl = baseUrl || settings.BASE_URL || DEFAULT_CONFIG.BASE_URL;
     this.token = token || settings.TOKEN || DEFAULT_CONFIG.TOKEN;
     this.textExtensions = new Set(settings.TEXT_EXTENSIONS ?? DEFAULT_CONFIG.TEXT_EXTENSIONS);
@@ -167,6 +174,9 @@ export class Config {
     this.indexStoragePath = USER_DATA_DIR;
     this.batchSize = settings.BATCH_SIZE ?? DEFAULT_CONFIG.BATCH_SIZE;
     this.maxLinesPerBlob = settings.MAX_LINES_PER_BLOB ?? DEFAULT_CONFIG.MAX_LINES_PER_BLOB;
+     // 重新加载时同步刷新 autoIndexOnSearch，确保 Web 配置修改后立即生效
+    this.autoIndexOnSearch =
+      settings.AUTO_INDEX_ON_SEARCH ?? DEFAULT_CONFIG.AUTO_INDEX_ON_SEARCH;
     this.baseUrl = this.cliBaseUrl || settings.BASE_URL || DEFAULT_CONFIG.BASE_URL;
     this.token = this.cliToken || settings.TOKEN || DEFAULT_CONFIG.TOKEN;
     this.textExtensions = new Set(settings.TEXT_EXTENSIONS ?? DEFAULT_CONFIG.TEXT_EXTENSIONS);
@@ -214,4 +224,3 @@ export function initConfig(baseUrl?: string, token?: string): Config {
   configInstance = new Config(baseUrl, token);
   return configInstance;
 }
-

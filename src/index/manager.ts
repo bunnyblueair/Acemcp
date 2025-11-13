@@ -111,6 +111,8 @@ export class IndexManager {
   private excludePatterns: string[];
   private projectsFile: string;
   private httpClient: AxiosInstance;
+  // 是否在搜索前自动执行自动索引，用于控制性能与实时性
+  private autoIndexOnSearch: boolean;
 
   constructor(
     storagePath: string,
@@ -119,7 +121,8 @@ export class IndexManager {
     textExtensions: Set<string>,
     batchSize: number,
     maxLinesPerBlob: number = 800,
-    excludePatterns: string[] = []
+    excludePatterns: string[] = [],
+    autoIndexOnSearch: boolean = true
   ) {
     this.storagePath = storagePath;
     
@@ -137,6 +140,7 @@ export class IndexManager {
     this.maxLinesPerBlob = maxLinesPerBlob;
     this.excludePatterns = excludePatterns;
     this.projectsFile = path.join(storagePath, 'projects.json');
+    this.autoIndexOnSearch = autoIndexOnSearch;
 
     // 确保存储目录存在
     if (!fs.existsSync(storagePath)) {
@@ -607,18 +611,24 @@ export class IndexManager {
     logger.info(`Searching context in project ${normalizedPath} with query: ${query}`);
 
     try {
-      // 步骤 1: 自动索引
-      logger.info(`Auto-indexing project ${normalizedPath} before search...`);
-      const indexResult = await this.indexProject(projectRootPath);
+      // 步骤 1: 自动索引（可配置开关）
+      if (this.autoIndexOnSearch) {
+        logger.info(`Auto-indexing project ${normalizedPath} before search...`);
+        const indexResult = await this.indexProject(projectRootPath);
 
-      if (indexResult.status === 'error') {
-        return `Error: Failed to index project before search. ${indexResult.message}`;
-      }
+        if (indexResult.status === 'error') {
+          return `Error: Failed to index project before search. ${indexResult.message}`;
+        }
 
-      // 记录索引统计信息
-      if (indexResult.stats) {
+        // 记录索引统计信息
+        if (indexResult.stats) {
+          logger.info(
+            `Auto-indexing completed: total=${indexResult.stats.total_blobs}, existing=${indexResult.stats.existing_blobs}, new=${indexResult.stats.new_blobs}`
+          );
+        }
+      } else {
         logger.info(
-          `Auto-indexing completed: total=${indexResult.stats.total_blobs}, existing=${indexResult.stats.existing_blobs}, new=${indexResult.stats.new_blobs}`
+          `Auto-indexing is disabled for project ${normalizedPath}, searching with existing index only`
         );
       }
 
@@ -627,7 +637,11 @@ export class IndexManager {
       const blobNames = projects[normalizedPath] || [];
 
       if (blobNames.length === 0) {
-        return `Error: No blobs found for project ${normalizedPath} after indexing.`;
+        return `Error: No blobs found for project ${normalizedPath}${
+          this.autoIndexOnSearch
+            ? ' after indexing.'
+            : '. Auto indexing is disabled, please index the project first.'
+        }`;
       }
 
       // 步骤 3: 执行搜索
@@ -680,4 +694,3 @@ export class IndexManager {
     }
   }
 }
-

@@ -57,7 +57,9 @@ export async function searchContextTool(arguments_: SearchContextArgs): Promise<
       config.textExtensions,
       config.batchSize,
       config.maxLinesPerBlob,
-      config.excludePatterns
+      config.excludePatterns,
+      // 通过配置控制是否在搜索前自动索引，避免大项目中每次搜索都扫描全量文件
+      config.autoIndexOnSearch
     );
 
     const result = await indexManager.searchContext(normalizedPath, query);
@@ -68,4 +70,3 @@ export async function searchContextTool(arguments_: SearchContextArgs): Promise<
     return { type: 'text', text: `Error: ${error.message}` };
   }
 }
-

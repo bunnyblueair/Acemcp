@@ -20,9 +20,19 @@ import { createApp } from './web/app.js';
 /**
  * 解析命令行参数
  */
-function parseArgs(): { baseUrl?: string; token?: string; webPort?: number } {
+function parseArgs(): {
+  baseUrl?: string;
+  token?: string;
+  webPort?: number;
+  autoIndexOnSearch?: boolean;
+} {
   const args = process.argv.slice(2);
-  const result: { baseUrl?: string; token?: string; webPort?: number } = {};
+  const result: {
+    baseUrl?: string;
+    token?: string;
+    webPort?: number;
+    autoIndexOnSearch?: boolean;
+  } = {};
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -34,6 +44,10 @@ function parseArgs(): { baseUrl?: string; token?: string; webPort?: number } {
       i++;
     } else if (arg === '--web-port' && i + 1 < args.length) {
       result.webPort = parseInt(args[i + 1], 10);
+      i++;
+    } else if (arg === '--no-auto-index-on-search') {
+      // 通过命令行参数显式关闭搜索前自动索引，提高大项目中的搜索性能
+      result.autoIndexOnSearch = false;
       i++;
     }
   }
@@ -164,7 +178,7 @@ async function startWebServer(port: number): Promise<void> {
  */
 async function main(): Promise<void> {
   try {
-    const { baseUrl, token, webPort } = parseArgs();
+    const { baseUrl, token, webPort, autoIndexOnSearch } = parseArgs();
 
     // 如果启用了 Web 界面，先设置日志广播支持
     if (webPort) {
@@ -178,6 +192,10 @@ async function main(): Promise<void> {
 
     // 初始化配置
     const config = initConfig(baseUrl, token);
+    if (autoIndexOnSearch === false) {
+      // 当通过命令行显式关闭自动索引时，记录提示日志，方便在日志中排查性能相关行为
+      config.autoIndexOnSearch = false;
+    }
     config.validate();
 
     logger.info('正在启动 acemcp MCP 服务器...');
@@ -185,6 +203,9 @@ async function main(): Promise<void> {
       `配置: index_storage_path=${config.indexStoragePath}, batch_size=${config.batchSize}`
     );
     logger.info(`API: base_url=${config.baseUrl}`);
+    logger.info(
+      `搜索前自动索引: ${config.autoIndexOnSearch ? '已启用（保证最新索引）' : '已关闭（仅使用已有索引，性能更佳）'}`
+    );
 
     // 如果请求，启动 Web 服务器
     if (webPort) {

@@ -85,6 +85,11 @@
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" x-text="t('exclude_patterns')"></label>
                         <p class="mt-1 text-sm text-gray-900 dark:text-gray-100" x-text="config.exclude_patterns?.join(', ')"></p>
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" x-text="t('auto_index_on_search')"></label>
+                        <p class="mt-1 text-sm text-gray-900 dark:text-gray-100" x-text="config.auto_index_on_search ? t('auto_index_on_search_enabled') : t('auto_index_on_search_disabled')"></p>
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400" x-text="t('auto_index_on_search_hint')"></p>
+                    </div>
                 </div>
 
                 <form x-show="editMode" @submit.prevent="saveConfig()" class="space-y-3">
@@ -114,6 +119,19 @@
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" x-text="t('exclude_patterns')"></label>
                         <textarea x-model="editConfig.exclude_patterns_str" rows="4" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2 border" placeholder=".venv, node_modules, .git"></textarea>
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400" x-text="t('exclude_patterns_hint')"></p>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" x-text="t('auto_index_on_search')"></label>
+                            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400" x-text="t('auto_index_on_search_hint')"></p>
+                        </div>
+                        <label class="inline-flex items-center cursor-pointer">
+                            <span class="mr-2 text-sm text-gray-700 dark:text-gray-300" x-text="editConfig.auto_index_on_search ? t('auto_index_on_search_enabled') : t('auto_index_on_search_disabled')"></span>
+                            <input type="checkbox" class="sr-only peer" x-model="editConfig.auto_index_on_search">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer dark:bg-gray-700 peer-checked:bg-blue-600 relative">
+                                <div class="absolute left-0.5 top-0.5 h-5 w-5 bg-white rounded-full shadow transform transition-transform peer-checked:translate-x-full"></div>
+                            </div>
+                        </label>
                     </div>
                     <div class="flex gap-2">
                         <button type="submit" class="px-4 py-2 bg-green-500 dark:bg-green-600 text-white rounded hover:bg-green-600 dark:hover:bg-green-700 text-sm" x-text="t('save_changes')">
@@ -383,6 +401,10 @@
                 text_extensions_hint: 'Comma-separated list of file extensions (e.g., .py, .js, .ts)',
                 exclude_patterns: 'Exclude Patterns',
                 exclude_patterns_hint: 'Comma-separated patterns to exclude (e.g., .venv, node_modules, *.pyc)',
+                auto_index_on_search: 'Auto index before search',
+                auto_index_on_search_hint: 'When disabled, searches only use existing index; please reindex manually after code changes.',
+                auto_index_on_search_enabled: 'Enabled',
+                auto_index_on_search_disabled: 'Disabled',
                 save_changes: 'Save Changes',
                 realtime_logs: 'Real-time Logs',
                 clear: 'Clear',
@@ -451,6 +473,10 @@
                 text_extensions_hint: '逗号分隔的文件扩展名列表（例如：.py, .js, .ts）',
                 exclude_patterns: '排除模式',
                 exclude_patterns_hint: '逗号分隔的排除模式（例如：.venv, node_modules, *.pyc）',
+                auto_index_on_search: '搜索前自动索引',
+                auto_index_on_search_hint: '关闭后搜索仅使用已有索引，代码更新后需手动重新索引。',
+                auto_index_on_search_enabled: '已启用',
+                auto_index_on_search_disabled: '已关闭',
                 save_changes: '保存更改',
                 realtime_logs: '实时日志',
                 clear: '清空',
@@ -628,7 +654,9 @@
                             batch_size: this.config.batch_size,
                             max_lines_per_blob: this.config.max_lines_per_blob,
                             text_extensions_str: this.config.text_extensions?.join(', ') || '',
-                            exclude_patterns_str: this.config.exclude_patterns?.join(', ') || ''
+                            exclude_patterns_str: this.config.exclude_patterns?.join(', ') || '',
+                            // 全局开关：控制搜索前是否自动索引，默认视为开启
+                            auto_index_on_search: this.config.auto_index_on_search !== false
                         };
                     } catch (error) {
                         console.error('Failed to load config:', error);
@@ -815,7 +843,9 @@
                             exclude_patterns: this.editConfig.exclude_patterns_str
                                 .split(',')
                                 .map(pattern => pattern.trim())
-                                .filter(pattern => pattern.length > 0)
+                                .filter(pattern => pattern.length > 0),
+                            // 将全局开关回传给后端，由服务端写入 AUTO_INDEX_ON_SEARCH 配置
+                            auto_index_on_search: this.editConfig.auto_index_on_search
                         };
 
                         const response = await fetch('/api/config', {
@@ -1105,4 +1135,3 @@
     </script>
 </body>
 </html>
-
