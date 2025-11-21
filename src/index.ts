@@ -187,16 +187,19 @@ async function main(): Promise<void> {
       getLogBroadcaster();
     }
 
-    // 设置日志
-    setupLogging();
-
-    // 初始化配置
+    // 初始化配置（先于日志，因为日志需要读取配置）
     const config = initConfig(baseUrl, token);
     if (autoIndexOnSearch === false) {
       // 当通过命令行显式关闭自动索引时，记录提示日志，方便在日志中排查性能相关行为
       config.autoIndexOnSearch = false;
     }
     config.validate();
+
+    // 设置日志（使用配置中的参数）
+    setupLogging({
+      maxFileSize: config.logMaxFileSizeMB * 1024 * 1024,  // 转换为字节
+      maxFiles: config.logMaxFiles,
+    });
 
     logger.info('正在启动 acemcp MCP 服务器...');
     logger.info(

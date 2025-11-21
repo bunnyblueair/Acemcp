@@ -549,13 +549,25 @@ export class IndexManager {
         }
 
         if (uploadedBlobNames.length === 0 && blobsToUpload.length > 0) {
-          if (failedBatches.length > 0) {
-            return {
-              status: 'error',
-              message: `All batches failed. Failed batches: ${failedBatches.join(', ')}`,
-            };
+          // 判断项目是否已经初始化过（有旧数据）
+          const isInitialized = existingHashes.size > 0;
+          
+          if (!isInitialized) {
+            // 未初始化的新项目，所有批次失败返回错误
+            if (failedBatches.length > 0) {
+              return {
+                status: 'error',
+                message: `All batches failed on first indexing. Failed batches: ${failedBatches.join(', ')}`,
+              };
+            }
+            return { status: 'error', message: 'No blob names returned from API on first indexing' };
+          } else {
+            // 已初始化的项目，即使此次上传全部失败也不影响使用
+            logger.warning(
+              `Project ${normalizedPath} has ${existingHashes.size} existing blobs. Current upload failed but project can still be used with existing data.`
+            );
+            // 继续执行，使用已有的 blob 数据
           }
-          return { status: 'error', message: 'No blob names returned from API' };
         }
       } else {
         logger.info('No new blobs to upload, all blobs already exist in index');

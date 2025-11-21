@@ -1042,6 +1042,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 | **编码错误** | `UnsupportedEncoding` | [编码问题](#编码问题) |
 | **端口占用** | `EADDRINUSE` | [端口问题](#web-界面无法访问) |
 | **权限错误** | `EACCES` | [权限问题](#权限问题) |
+| **上传失败** | 批次上传失败 | [上传失败处理](UPLOAD_FAILURE_HANDLING.md) |
+| **日志文件过大** | 日志占用空间过多 | [日志轮转配置](LOG_ROTATION_CONFIG.md) |
 | **WSL 路径** | 路径转换失败 | [WSL 指南](WSL_PATH_GUIDE.md) |
 
 ### 路径问题
