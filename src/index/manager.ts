@@ -20,6 +20,10 @@ interface Blob {
   content: string;
 }
 
+const MAX_BLOB_SIZE = 128 * 1024;
+const MAX_BATCH_SIZE = 1024 * 1024;
+const USER_AGENT = 'augment.cli/0.17.0';
+
 /**
  * 索引结果接口
  */
@@ -79,6 +83,21 @@ async function readFileWithEncoding(filePath: string): Promise<string> {
   const content = iconv.decode(buffer, 'utf-8');
   logger.warning(`Read ${filePath} with utf-8 (some characters may be lost)`);
   return content;
+}
+
+/**
+ * 生成稳定的会话 ID
+ */
+function getSessionId(): string {
+  const globalWithSession = globalThis as typeof globalThis & {
+    __acemcpSessionId?: string;
+  };
+
+  if (!globalWithSession.__acemcpSessionId) {
+    globalWithSession.__acemcpSessionId = crypto.randomUUID();
+  }
+
+  return globalWithSession.__acemcpSessionId;
 }
 
 /**
@@ -271,6 +290,66 @@ export class IndexManager {
   }
 
   /**
+   * 粗略检测文本内容是否更像二进制，避免上传脏数据
+   */
+  private isBinaryContent(content: string): boolean {
+    if (!content) {
+      return false;
+    }
+
+    const totalChars = content.length;
+    const nonPrintable = Array.from(content).filter((char) => {
+      const code = char.charCodeAt(0);
+      return (code >= 0 && code <= 8) || (code >= 14 && code <= 31) || code === 127;
+    }).length;
+
+    return nonPrintable > totalChars / 10;
+  }
+
+  /**
+   * 为每次请求补齐与 Rust 版一致的关键头
+   */
+  private createRequestHeaders(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'User-Agent': USER_AGENT,
+      'x-request-id': crypto.randomUUID(),
+      'x-request-session-id': getSessionId(),
+    };
+  }
+
+  /**
+   * 按 blob 个数和总字节数共同切分批次，避免服务端 400
+   */
+  private buildUploadBatches(blobs: Blob[]): Blob[][] {
+    const maxBlobsPerBatch = Math.max(this.batchSize, 1);
+    const batches: Blob[][] = [];
+    let currentBatch: Blob[] = [];
+    let currentSize = 0;
+
+    for (const blob of blobs) {
+      const blobSize = Buffer.byteLength(blob.path, 'utf-8') + Buffer.byteLength(blob.content, 'utf-8');
+      const wouldExceedSize = currentSize + blobSize > MAX_BATCH_SIZE;
+      const wouldExceedCount = currentBatch.length >= maxBlobsPerBatch;
+
+      if (currentBatch.length > 0 && (wouldExceedSize || wouldExceedCount)) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentSize = 0;
+      }
+
+      currentBatch.push(blob);
+      currentSize += blobSize;
+    }
+
+    if (currentBatch.length > 0) {
+      batches.push(currentBatch);
+    }
+
+    return batches;
+  }
+
+  /**
    * 将文件内容分割为多个 blob（如果需要）
    * 
    * 注意：保留换行符以确保与 Python 版本的 hash 一致
@@ -401,8 +480,25 @@ export class IndexManager {
               logger.warning(`Skipping file outside project root: ${fullPath}`);
               continue;
             }
+
+            const metadata = await fs.promises.stat(fullPath);
+            if (metadata.size > MAX_BLOB_SIZE) {
+              logger.warning(`Skipping large file: ${relativePath} (${Math.floor(metadata.size / 1024)}KB)`);
+              continue;
+            }
             
             const content = await readFileWithEncoding(fullPath);
+            if (this.isBinaryContent(content)) {
+              logger.debug(`Skipping binary-like file: ${relativePath}`);
+              continue;
+            }
+
+            if (Buffer.byteLength(content, 'utf-8') > MAX_BLOB_SIZE) {
+              logger.warning(
+                `Skipping large decoded file: ${relativePath} (${Math.floor(Buffer.byteLength(content, 'utf-8') / 1024)}KB)`
+              );
+              continue;
+            }
 
             // 分割文件（如果需要）
             const fileBlobs = this.splitFileContent(relativePath, content);
@@ -440,18 +536,29 @@ export class IndexManager {
         return await fn();
       } catch (error: any) {
         lastError = error;
+        const status = error.response?.status;
+        const retryAfter = error.response?.headers?.['retry-after'];
+        const retryAfterSeconds = Number.parseInt(Array.isArray(retryAfter) ? retryAfter[0] : retryAfter, 10);
+        const isTimeout =
+          error.code === 'ETIMEDOUT' ||
+          error.code === 'ECONNABORTED' ||
+          `${error.message || ''}`.toLowerCase().includes('timeout');
         const isRetryable =
           error.code === 'ECONNREFUSED' ||
-          error.code === 'ETIMEDOUT' ||
           error.code === 'ENOTFOUND' ||
-          (error.response && error.response.status >= 500);
+          isTimeout ||
+          status === 429 ||
+          status >= 500;
 
         if (!isRetryable || attempt === maxRetries - 1) {
           logger.error(`Request failed after ${attempt + 1} attempts: ${error.message}`);
           throw error;
         }
 
-        const waitTime = retryDelay * Math.pow(2, attempt);
+        const waitTime =
+          status === 429
+            ? (Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1000 : 20000)
+            : retryDelay * Math.pow(2, attempt);
         logger.warning(
           `Request failed (attempt ${attempt + 1}/${maxRetries}): ${error.message}. Retrying in ${waitTime}ms...`
         );
@@ -504,25 +611,32 @@ export class IndexManager {
       // 只上传新的 blob
       const uploadedBlobNames: string[] = [];
       const failedBatches: number[] = [];
+      let uploadBatchCount = 0;
 
       if (blobsToUpload.length > 0) {
-        const totalBatches = Math.ceil(blobsToUpload.length / this.batchSize);
+        const uploadBatches = this.buildUploadBatches(blobsToUpload);
+        const totalBatches = uploadBatches.length;
+        uploadBatchCount = totalBatches;
         logger.info(
           `Uploading ${blobsToUpload.length} new blobs in ${totalBatches} batches (batch_size=${this.batchSize})`
         );
 
         for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
-          const startIdx = batchIdx * this.batchSize;
-          const endIdx = Math.min(startIdx + this.batchSize, blobsToUpload.length);
-          const batchBlobs = blobsToUpload.slice(startIdx, endIdx);
+          const batchBlobs = uploadBatches[batchIdx];
 
           logger.info(`Uploading batch ${batchIdx + 1}/${totalBatches} (${batchBlobs.length} blobs)`);
 
           try {
             const uploadBatch = async () => {
-              const response = await this.httpClient.post(`${this.baseUrl}/batch-upload`, {
-                blobs: batchBlobs,
-              });
+              const response = await this.httpClient.post(
+                `${this.baseUrl}/batch-upload`,
+                {
+                  blobs: batchBlobs,
+                },
+                {
+                  headers: this.createRequestHeaders(),
+                }
+              );
               return response.data;
             };
 
@@ -583,9 +697,8 @@ export class IndexManager {
       // 构建结果消息
       let message: string;
       if (blobsToUpload.length > 0) {
-        const totalBatches = Math.ceil(blobsToUpload.length / this.batchSize);
-        const successBatches = totalBatches - failedBatches.length;
-        message = `Project indexed with ${allBlobNames.length} total blobs (existing: ${existingHashes.size}, new: ${uploadedBlobNames.length}, batches: ${successBatches}/${totalBatches} successful)`;
+        const successBatches = uploadBatchCount - failedBatches.length;
+        message = `Project indexed with ${allBlobNames.length} total blobs (existing: ${existingHashes.size}, new: ${uploadedBlobNames.length}, batches: ${successBatches}/${uploadBatchCount} successful)`;
       } else {
         message = `Project indexed with ${allBlobNames.length} total blobs (all existing, no upload needed)`;
       }
@@ -677,6 +790,7 @@ export class IndexManager {
           `${this.baseUrl}/agents/codebase-retrieval`,
           payload,
           {
+            headers: this.createRequestHeaders(),
             timeout: 60000,  // 搜索请求使用更长的超时时间
           }
         );
